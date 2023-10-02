@@ -63,14 +63,14 @@ class DynamicLifetimeModel:
         self.o_c = np.zeros((len(self.t), len(self.t))) # outflow compositionO
         # construct the hazard function
         self.__compute_hz__()
-        for m in range(len(self.t)):
-            if m>0: # the initial stock is assumed to be 0
-                self.o_c[m,:m] = self.s_c[m-1,:m] * self.hz[m,:m] 
+        for t in range(len(self.t)): # for each year t
+            if t>0: # the initial stock is assumed to be 0
+                self.o_c[t,:t] = self.s_c[t-1,:t] * self.hz[t,:t] 
                 # subtract outflows of cohorts <m from the previous stock 
-                self.s_c[m,:m] = self.s_c[m-1,:m] - self.o_c[m,:m]
+                self.s_c[t,:t] = self.s_c[t-1,:t] - self.o_c[t,:t]
             # Add new cohort to stock
-            self.s_c[m,m] = self.i[m]
-            self.o_c[m,m] = self.s_c[m,m] * self.hz[m,m]
+            self.s_c[t,t] = self.i[t]
+            self.o_c[t,t] = self.s_c[t,t] * self.hz[t,t]
         self.o = self.o_c.sum(axis=1)
         self.s = self.s_c.sum(axis=1)
         return
@@ -100,18 +100,18 @@ class DynamicLifetimeModel:
         self.__compute_hz__()
         # Initializing values
         self.s_c[0,0] = self.s[0]               
-        for m in range(len(self.t)):  # for all years m
-            if m>0: # the initial stock is assumed to be 0
+        for t in range(len(self.t)):  # for each year t
+            if t>0: # the initial stock is assumed to be 0
                 # Probability of any failure is calculated using product hazard function 
-                self.o_c[m,:m] = self.s_c[m-1,:m] * self.hz[m,:m] 
+                self.o_c[t,:t] = self.s_c[t-1,:t] * self.hz[t,:t] 
                 # subtract outflows of cohorts <m from the previous stock 
-                self.s_c[m,:m] = self.s_c[m-1,:m] - self.o_c[m,:m]
+                self.s_c[t,:t] = self.s_c[t-1,:t] - self.o_c[t,:t]
                 # Add new cohort to stock
-                self.s_c[m,m] = self.s[m] - self.s_c[m,:m].sum()
+                self.s_c[t,t] = self.s[t] - self.s_c[t,:t].sum()
            
             # Calculate new inflow, accounting for outflows in the first year
-            self.o_c[m,m] = self.s_c[m,m] * self.hz[m,m] 
-            self.i[m] = self.ds[m] + self.o_c[m,:].sum()
+            self.o_c[t,t] = self.s_c[t,t] * self.hz[t,t] 
+            self.i[t] = self.ds[t] + self.o_c[t,:].sum()
         self.o = self.o_c.sum(axis=1)
         return
 
@@ -280,12 +280,12 @@ class DynamicLifetimeModel:
             value_right = value
         else:
             raise Exception("Parameter 'ref' can only take values 'relative' or 'absolute'.")
-        for n in range(idx, len(self.t)):
-            cohort=self.t[n]
+        for c in range(idx, len(self.t)): # for each cohort
+            cohort=self.t[c]
             if cohort < stop:
-                lt_par[n:,n] = value_right+(stop-cohort)/(stop-start)*(value_left-value_right)
+                lt_par[c:,c] = value_right+(stop-cohort)/(stop-start)*(value_left-value_right)
             else:
-                lt_par[n:,n] = value_right
+                lt_par[c:,c] = value_right
         return lt_par
 
     
@@ -306,13 +306,13 @@ class DynamicLifetimeModel:
             cohort_idx = range(len(self.t)) # for each cohort
         else:
             cohort_idx = np.where(np.in1d(self.t,cohorts)==True)[0]
-        for n in cohort_idx: # for each cohort
+        for c in cohort_idx: # for each cohort
             idx = np.where(self.t==start)[0][0]
             # select the value to start with
-            if idx>n:
-                value_up = lt_par[idx,n]
+            if idx>c:
+                value_up = lt_par[idx,c] # TODO: change name from value_up and value_down to sth like value_1 and value_2
             else: # if the time effect starts before the cohort year
-                value_up = lt_par[n,n]
+                value_up = lt_par[c,c]
             # select the value to end with
             if ref=='relative':
                 value_down=value_up*value
@@ -321,9 +321,9 @@ class DynamicLifetimeModel:
             else:
                 raise Exception("Parameter 'how' can only take values 'relative' or 'absolute'.")
             
-            for m in range(n,len(self.t)): # for each year
-                year = self.t[m]
-                v_old = lt_par[m,n]
+            for t in range(c,len(self.t)): # for each year
+                year = self.t[t]
+                v_old = lt_par[t,c]
                 # choose the value to assign depending on the year
                 if year < start:
                     continue
@@ -333,11 +333,11 @@ class DynamicLifetimeModel:
                     v = value_down
                 # keep the trend, e.g., if the values should decrease down to 6, then keep the ones below that unchanged
                 if trend=='decreasing':
-                    lt_par[m,n] = min(v_old, v)
+                    lt_par[t,c] = min(v_old, v)
                 elif trend=='increasing':
-                    lt_par[m,n] = max(v_old, v)
+                    lt_par[t,c] = max(v_old, v)
                 else:
-                    lt_par[m,n] = v
+                    lt_par[t,c] = v
         return lt_par
 
 
