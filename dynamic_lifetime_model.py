@@ -21,7 +21,8 @@ import math
 
 class DynamicLifetimeModel:
     """
-    Class containing a dynamic stock model with dynamic lifetime (variable by time and/or by cohort)
+    Class containing a dynamic stock model with dynamic lifetime. 
+    The lifetime can vary by time (t) or cohort (c).
 
     Attributes
     ----------
@@ -59,10 +60,10 @@ class DynamicLifetimeModel:
             raise Exception('No inflows specified')
         elif np.shape(self.i) != np.shape(self.t):
             raise Exception(f'Non-compatible array shapes. Array t has shape {np.shape(self.t)}, but array i has shape {np.shape(self.i)}')
+        if self.hz is None:
+            self.__compute_hz__()
         self.s_c = np.zeros((len(self.t), len(self.t))) # stock composition per year
         self.o_c = np.zeros((len(self.t), len(self.t))) # outflow compositionO
-        # construct the hazard function
-        self.__compute_hz__()
         for t in range(len(self.t)): # for each year t
             if t>0: # the initial stock is assumed to be 0
                 self.o_c[t,:t] = self.s_c[t-1,:t] * self.hz[t,:t] 
@@ -92,12 +93,12 @@ class DynamicLifetimeModel:
         """
         if self.s is None:
             raise Exception('No stock specified')
+        if self.hz is None:
+            self.__compute_hz__()
         self.s_c = np.zeros((len(self.t), len(self.t))) # stock composition per year
         self.o_c = np.zeros((len(self.t), len(self.t))) # outflow composition
         self.i = np.zeros(len(self.t)) # product inflows
         self.ds = np.concatenate(([self.s[0]], np.diff(self.s))) # stock change
-        # construct the hazard function
-        self.__compute_hz__()
         # Initializing values
         self.s_c[0,0] = self.s[0]               
         for t in range(len(self.t)):  # for each year t
@@ -116,97 +117,166 @@ class DynamicLifetimeModel:
         return
 
 
-    def __compute_hz__(self):
+    def __compute_hz__(self, lt=None):
         """
-        Calculates a hazard table self.hz(m,n) which denotes the probability of a product inflow from year n (cohort) 
-        failing during year m, still present at the beginning of year m (after m-n years).
+        Calculates the hazard table self.hz(t,c) from lifetime distribution parameters. 
+        The hazard table denotes the probability of a product inflow from year c (cohort) 
+        failing during year m, still present at the beginning of year t (after t-c years).
+        lt : lifetime distribution: dictionary with distribution type and parameters, where each parameter is of shape (t,c)
         """
-        if self.hz is None:
+        if lt is None:
             if self.lt is None:
                 raise Exception('No product lifetime specified')
-            # find unique sets of lifetime parameters
-            unique, inverse, length = self.__find_unique_lt__()
-            # calculate sf for each unique parameter set
-            hz_unique = np.zeros((len(self.t),length))
-            if self.lt['Type'] == 'Fixed':
-                for i in range(length): # for each unique parameter set
-                    if unique['Mean'][i] != 0:
-                        sf = np.multiply(1, (np.arange(len(self.t)) < unique['Mean'][i])) # converts bool to 0/1
-                        # calculate hz for each unique parameter set
-                        hz_unique[0,i] = 1-sf[0]
-                        for m in range(len(self.t)-1): # for each year m
-                            if sf[m] != 0:
-                                hz_unique[m+1,i] = (sf[m] - sf[m+1]) / sf[m]
-                            else: 
-                                hz_unique[m+1,i] = 1
-            elif self.lt['Type'] == 'Normal':
-                for i in range(length): # for each unique parameter set
-                    if unique['StdDev'][i] != 0:
-                        sf = scipy.stats.norm.sf(np.arange(len(self.t)), loc=unique['Mean'][i], scale=unique['StdDev'][i])
-                        # calculate hz for each unique parameter set
-                        hz_unique[0,i] = 1-sf[0]
-                        for m in range(len(self.t)-1): # for each year m
-                            if sf[m] != 0:
-                                hz_unique[m+1,i] = (sf[m] - sf[m+1]) / sf[m]
-                            else: 
-                                hz_unique[m+1,i] = 1
-            elif self.lt['Type'] == 'FoldedNormal':
-                for i in range(length): # for each unique parameter set
-                    if unique['StdDev'][i] != 0:
-                        sf = scipy.stats.foldnorm.sf(np.arange(len(self.t)), c=unique['Mean'][i]/unique['StdDev'][i], loc=0, scale=unique['StdDev'][i])
-                        # calculate hz for each unique parameter set
-                        hz_unique[0,i] = 1-sf[0]
-                        for m in range(len(self.t)-1): # for each year m
-                            if sf[m] != 0:
-                                hz_unique[m+1,i] = (sf[m] - sf[m+1]) / sf[m]
-                            else: 
-                                hz_unique[m+1,i] = 1
-            elif self.lt['Type'] == 'LogNormal': 
-                for i in range(length): # for each unique parameter set
-                    if unique['StdDev'][i] != 0:
-                        # calculate parameter sigma of underlying normal distribution:
-                        LT_LN = np.log(unique['Mean'][i] / np.sqrt(1 + unique['Mean'][i] * unique['Mean'][i] / (unique['StdDev'][i] * unique['StdDev'][i]))) 
-                        SG_LN = np.sqrt(np.log(1 + unique['Mean'][i] * unique['Mean'][i] / (unique['StdDev'][i] * unique['StdDev'][i])))
-                        sf = scipy.stats.lognorm.sf(np.arange(len(self.t)), s=SG_LN, loc = 0, scale=np.exp(LT_LN))
-                        # calculate hz for each unique parameter set
-                        hz_unique[0,i] = 1-sf[0]
-                        for m in range(len(self.t)-1): # for each year m
-                            if sf[m] != 0:
-                                hz_unique[m+1,i] = (sf[m] - sf[m+1]) / sf[m]
-                            else: 
-                                hz_unique[m+1,i] = 1
-            elif self.lt['Type'] == 'Weibull':
-                for i in range(length): # for each unique parameter set
-                    if unique['Scale'][i] != 0:
-                        sf = scipy.stats.weibull_min.sf(np.arange(len(self.t)), c=unique['Shape'][i], loc = 0, scale=unique['Scale'][i])
-                        # calculate hz for each unique parameter set
-                        hz_unique[0,i] = 1-sf[0]
-                        for m in range(len(self.t)-1): # for each year m
-                            if sf[m] != 0:
-                                hz_unique[m+1,i] = (sf[m] - sf[m+1]) / sf[m]
-                            else: 
-                                hz_unique[m+1,i] = 1
             else:
-                raise Exception(f"Distribution type {self.lt['Type']} is not implemented")
-            # calculate hazard table hz for the entire time-cohort matrix
-            self.hz = np.zeros((len(self.t), len(self.t)))
-            for n in range(len(self.t)): # for each cohort n
-                for m in range(n,len(self.t)): # for each year m
-                    self.hz[m,n] = hz_unique[m-n,inverse[m,n]]
-            return self.hz
+                lt = self.lt
+        # find unique sets of lifetime parameters
+        unique, inverse, length = self.__find_unique_lt__(lt)
+        # calculate sf for each unique parameter set
+        hz_unique = np.zeros((len(self.t),length))
+        if lt['Type'] == 'Fixed':
+            for i in range(length): # for each unique parameter set
+                if unique['Mean'][i] != 0:
+                    sf = np.multiply(1, (np.arange(len(self.t)) < unique['Mean'][i])) # converts bool to 0/1
+                    hz_unique[:,i] = self.compute_hz_from_sf(sf) # calculate hz for each unique parameter set
+        elif lt['Type'] == 'Normal':
+            for i in range(length): # for each unique parameter set
+                if unique['StdDev'][i] != 0:
+                    sf = scipy.stats.norm.sf(np.arange(len(self.t)), loc=unique['Mean'][i], scale=unique['StdDev'][i])
+                    hz_unique[:,i] = self.compute_hz_from_sf(sf) # calculate hz for each unique parameter set
+        elif lt['Type'] == 'FoldedNormal':
+            for i in range(length): # for each unique parameter set
+                if unique['StdDev'][i] != 0:
+                    sf = scipy.stats.foldnorm.sf(np.arange(len(self.t)), c=unique['Mean'][i]/unique['StdDev'][i], loc=0, scale=unique['StdDev'][i])
+                    hz_unique[:,i] = self.compute_hz_from_sf(sf) # calculate hz for each unique parameter set
+        elif lt['Type'] == 'LogNormal': 
+            for i in range(length): # for each unique parameter set
+                if unique['StdDev'][i] != 0:
+                    # calculate parameter sigma of underlying normal distribution:
+                    LT_LN = np.log(unique['Mean'][i] / np.sqrt(1 + unique['Mean'][i] * unique['Mean'][i] / (unique['StdDev'][i] * unique['StdDev'][i]))) 
+                    SG_LN = np.sqrt(np.log(1 + unique['Mean'][i] * unique['Mean'][i] / (unique['StdDev'][i] * unique['StdDev'][i])))
+                    sf = scipy.stats.lognorm.sf(np.arange(len(self.t)), s=SG_LN, loc = 0, scale=np.exp(LT_LN))
+                    hz_unique[:,i] = self.compute_hz_from_sf(sf) # calculate hz for each unique parameter set
+        elif lt['Type'] == 'Weibull':
+            for i in range(length): # for each unique parameter set
+                if unique['Scale'][i] != 0:
+                    sf = scipy.stats.weibull_min.sf(np.arange(len(self.t)), c=unique['Shape'][i], loc = 0, scale=unique['Scale'][i])
+                    hz_unique[:,i] = self.compute_hz_from_sf(sf) # calculate hz for each unique parameter set
         else:
-            # hz already exists
-            return self.hz
+            raise Exception(f"Distribution type {lt['Type']} is not implemented")
+        # calculate hazard table hz for the entire time-cohort matrix
+        self.hz = np.zeros((len(self.t), len(self.t)))
+        for c in range(len(self.t)): # for each cohort c
+            for t in range(c,len(self.t)): # for each year t 
+                self.hz[t,c] = hz_unique[t-c,inverse[t,c]]
+        return self.hz
 
 
-    def __find_unique_lt__(self):
+    def __compute_sf__(self, lt=None):
+        """
+        Calculates a survival table self.sf(t,c) from lifetime distribution parameters. 
+        The survival table denotes the probability of a product inflow from year c
+        still being present in year t (after t-c years).
+        lt : lifetime distribution: dictionary with distribution type and parameters, where each parameter is of shape (t,c)
+        """
+        if lt is None:
+            if self.lt is None:
+                raise Exception('No product lifetime specified')
+            else:
+                lt = self.lt
+        # find unique sets of lifetime parameters
+        unique, inverse, length = self.__find_unique_lt__(lt)
+        # calculate sf for each unique parameter set
+        sf_unique = np.zeros((len(self.t),length))
+        if lt['Type'] == 'Fixed':
+            for i in range(length): # for each unique parameter set
+                if unique['Mean'][i] != 0:
+                    sf_unique[:,i] = np.multiply(1, (np.arange(len(self.t)) < unique['Mean'][i])) # converts bool to 0/1
+        elif lt['Type'] == 'Normal':
+            for i in range(length): # for each unique parameter set
+                if unique['StdDev'][i] != 0:
+                    sf_unique[:,i] = scipy.stats.norm.sf(np.arange(len(self.t)), loc=unique['Mean'][i], scale=unique['StdDev'][i])
+        elif lt['Type'] == 'FoldedNormal':
+            for i in range(length): # for each unique parameter set
+                if unique['StdDev'][i] != 0:
+                    sf_unique[:,i] = scipy.stats.foldnorm.sf(np.arange(len(self.t)), c=unique['Mean'][i]/unique['StdDev'][i], loc=0, scale=unique['StdDev'][i])
+                    # calculate hz for each unique parameter set
+        elif lt['Type'] == 'LogNormal': 
+            for i in range(length): # for each unique parameter set
+                if unique['StdDev'][i] != 0:
+                    # calculate parameter sigma of underlying normal distribution:
+                    LT_LN = np.log(unique['Mean'][i] / np.sqrt(1 + unique['Mean'][i] * unique['Mean'][i] / (unique['StdDev'][i] * unique['StdDev'][i]))) 
+                    SG_LN = np.sqrt(np.log(1 + unique['Mean'][i] * unique['Mean'][i] / (unique['StdDev'][i] * unique['StdDev'][i])))
+                    sf_unique[:,i] = scipy.stats.lognorm.sf(np.arange(len(self.t)), s=SG_LN, loc = 0, scale=np.exp(LT_LN))
+        elif lt['Type'] == 'Weibull':
+            for i in range(length): # for each unique parameter set
+                if unique['Scale'][i] != 0:
+                    sf_unique[:,i] = scipy.stats.weibull_min.sf(np.arange(len(self.t)), c=unique['Shape'][i], loc = 0, scale=unique['Scale'][i])
+        else:
+            raise Exception(f"Distribution type {lt['Type']} is not implemented")
+        # calculate survival table sf for the entire time-cohort matrix
+        sf = np.zeros((len(self.t), len(self.t)))
+        for c in range(len(self.t)): # for each cohort c
+            for t in range(c,len(self.t)): # for each year t
+                sf[t,c] = sf_unique[t-c,inverse[t,c]]
+        return sf
+
+
+    def compute_hz_from_sf(self, sf):
+        """
+        Calculates the hazard function self.hz(m) from a survival function sf(m). 
+        The hazard function denotes the probability of a product failing at age m, 
+        assuming it was still present at the beginning of year m.
+        sf : 1D numpy array with survival function
+        """
+        try:
+            np.reshape(sf, np.shape(self.t))
+        except:
+            print('The survival function does not have the same dimensions as the time vector t')
+        hz = np.zeros(len(self.t))
+        hz[0] = 1-sf[0]
+        for m in range(len(self.t)-1): # for each age m
+            if sf[m] != 0:
+                hz[m+1] = (sf[m] - sf[m+1]) / sf[m]
+            else:
+                hz[m+1] = 1
+        return hz
+
+
+    def compute_hz_for_multiple_lifetimes(self, lt1, lt2, share1, share2, full_output=False):
+        """
+        Calculates the hazard table self.hz(t,c) from multiple lifetime distributions. 
+        Each distribution has a weight, all weights should add up to 1. 
+        lt_dict : dictionary of lifetime dictionaries (distribution type and parameters, where each parameter is of shape (t,c))
+        shares : 1D numpy array with weights of each lifetime distribution from lt_dict 
+        full_output : boolean, if True then returns all hazard functions
+        """
+        if sum((share1, share2))!=1:
+            raise Exception('The shares should add up to one')
+        # TODO: check if shares has the same length as lt_dict
+        # TODO: make more generic to allow multiple lifetimes (not just two)
+        # for lt in [lt1, lt2]:
+        sf1 = self.__compute_sf__(lt1)
+        sf2 = self.__compute_sf__(lt2)
+        hz1 = self.__compute_hz__(lt1)
+        hz2 = self.__compute_hz__(lt2)
+        hz12 = np.zeros((len(self.t), len(self.t)))
+        for c in range(len(self.t)): # for each cohort c
+            hz12[c,c] = hz1[c,c]*share1+hz2[c,c]*share2
+            for t in range(c,len(self.t)-1): # for each year m
+                hz12[t+1,c] = (hz1[t+1,c]*share1*sf1[t,c]+hz2[t+1,c]*share2*sf2[t,c])/(share1*sf1[t,c]+share2*sf2[t,c])
+        if full_output:
+            return hz12, hz1, hz2
+        else:
+            return hz12
+
+    def __find_unique_lt__(self, lt):
         """
         Finds unique sets of p lifetime parameters (e.g., for Weibull, the set includes scale and shape), each parameter of shape (t,t).
         :return unique: The dictionary of parameters and their values, such that each set (p1[i], p2[i], ..., pn[i]) is unique. 
         :return inverse: The indices to reconstruct the original lt array from the unique array.
         :return length: Number of unique sets
         """
-        params = {k:v for k,v in self.lt.items() if k!= 'Type'}
+        params = {k:v for k,v in lt.items() if k!= 'Type'}
         sets = np.concatenate([[p] for p in params.values()], axis=0) # stacks all the p parameters
         sets = sets.reshape(len(params),-1) # reshapes from 3D form (p,t,t) into 2D form (p,t*t)
         unique, inverse = np.unique(sets, return_inverse=True, axis=1)
