@@ -340,6 +340,7 @@ class DynamicLifetimeModel:
         """
         # TODO: add a flag that will warn if a time effect has been added before this one or if another cohort effect exists that would be wiped out by this one
         # TODO: check if start and stop are within the t array
+        # TODO: check that a parameter is given (np array) and not the entire parameter dictionary
         start = math.floor(start)
         stop = math.ceil(stop)
         idx = np.where(self.t==start)[0][0]
@@ -359,7 +360,7 @@ class DynamicLifetimeModel:
         return lt_par
 
     
-    def add_time_effect(self, lt_par, value: float or int, start: int, stop: int, ref='absolute', trend=None,cohorts=None):
+    def add_period_effect(self, lt_par, value: float or int, start: int, stop: int, ref='absolute', trend=None,cohorts=None):
         """
         Adds a time effect to the given lifetime parameter.
         :par lt_par: An array of size (t,t) with the lifetime parameter
