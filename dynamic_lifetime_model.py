@@ -240,34 +240,47 @@ class DynamicLifetimeModel:
             else:
                 hz[m+1] = 1
         return hz
+        
 
-
-    def compute_hz_for_multiple_lifetimes(self, lt1, lt2, share1, share2, full_output=False):
+    def compute_hz_for_multiple_lifetimes(self, lt_list, shares, output=False, set_hz=True):
         """
         Calculates the hazard table self.hz(t,c) from multiple lifetime distributions. 
         Each distribution has a weight, all weights should add up to 1. 
-        lt_dict : dictionary of lifetime dictionaries (distribution type and parameters, where each parameter is of shape (t,c))
-        shares : 1D numpy array with weights of each lifetime distribution from lt_dict 
-        full_output : boolean, if True then returns all hazard functions
+        :par lt_list : a list where each element is a lifetime dictionary (distribution type and parameters of shape (t,c))
+        :par shares : list with weights of each lifetime distribution from lt_list 
+        :par output : boolean, if True then returns all the hazard functions
+        :par set_hz : boolean, if True then sets the output hz as self.hz
         """
-        if sum((share1, share2))!=1:
+        if sum(shares)!=1:
             raise Exception('The shares should add up to one')
-        # TODO: check if shares has the same length as lt_dict
+        if len(lt_list)!=len(shares):
+            raise Exception('The lists lt_list and shares should have the same length')
         # TODO: make more generic to allow multiple lifetimes (not just two)
         # for lt in [lt1, lt2]:
-        sf1 = self.__compute_sf__(lt1)
-        sf2 = self.__compute_sf__(lt2)
-        hz1 = self.__compute_hz__(lt1)
-        hz2 = self.__compute_hz__(lt2)
-        hz12 = np.zeros((len(self.t), len(self.t)))
+        sf_list = []
+        hz_list = []
+        for lt in lt_list:
+            sf_list.append(self.__compute_sf__(lt))
+            hz_list.append(self.__compute_hz__(lt))
+        hz_output = np.zeros((len(self.t), len(self.t)))
         for c in range(len(self.t)): # for each cohort c
-            hz12[c,c] = hz1[c,c]*share1+hz2[c,c]*share2
+            temp1 = []
+            for hz, share in zip(hz_list, shares):
+                temp1.append(hz[c,c]*share)
+            hz_output[c,c] = sum(temp1)
             for t in range(c,len(self.t)-1): # for each year m
-                hz12[t+1,c] = (hz1[t+1,c]*share1*sf1[t,c]+hz2[t+1,c]*share2*sf2[t,c])/(share1*sf1[t,c]+share2*sf2[t,c])
-        if full_output:
-            return hz12, hz1, hz2
-        else:
-            return hz12
+                temp2 = []
+                temp3 = []
+                for sf, hz, share in zip(sf_list, hz_list, shares):
+                    temp2.append(hz[t+1,c]*share*sf[t,c])
+                    temp3.append(share*sf[t,c])
+                hz_output[t+1,c] = sum(temp2)/sum(temp3)
+        if set_hz:
+            self.hz = hz_output
+        if output:
+            return hz_output, *hz_list
+
+
 
     def __find_unique_lt__(self, lt):
         """
