@@ -412,28 +412,62 @@ class DynamicLifetimeModel:
         return lt_par
 
 
-    def calculate_age(self, array, isstock: bool, inflows=None):
+    def calculate_age_stock(self, t=None, s_c=None, i=None, scale_by_inflow=True):
         """
-        Calculates the mean age of a stock or an outflow
-        :par array: An array of size (t,c) describing a process stock or outflows by time and cohort
-        :par isstock: True if the array describes a stock
-        :par inflows: An array of size (t) describing the process inflows. Used to scale the values by inflows in respective years
+        Calculates the mean age of stocks (measured at the end of each year)
+        :par t:   An array describing the time vector t
+        :par s_c: An array of size (t,c) with stocks by cohort
+        :par i:   An array of size (t) with inflows. Used to scale the values by inflows in respective years
+        :par scale_by_inflow: A boolean indicating if scaling by inflow should be performed. 
         :return age: An array of size (t) with the mean age in each year
         """
-        try: 
-            np.shape(array)[1]
-        except:
-            raise Exception("Array must have two dimensions")
-        if isstock: # stock (measured at the end of each year)
-            age_matrix = np.array([self.t]).T - np.array([self.t])+1
-            age_matrix[np.triu_indices(age_matrix.shape[0])] = 0
-            np.fill_diagonal(age_matrix, 1)
-        else: # outflows during the year
-            age_matrix = np.array([self.t]).T - np.array([self.t])
-            age_matrix[np.triu_indices(age_matrix.shape[0])] = 0
-        if inflows is not None:
-            array = np.einsum('tc,c->tc', array, self.reciprocal(inflows))
-        
+        if i is None:
+            i = self.i
+        if t is None:
+            t = self.t
+        if s_c is None:
+            s_c = self.s_c
+        if not np.shape(s_c) == (len(t), len(t)):
+            raise Exception(f"The array s_c has size {np.shape(s_c)}, while it should have the size {(len(t), len(t))}.")
+        if not (np.shape(i) == (len(t)) or np.shape(i) == (len(t),)):
+            raise Exception(f"The array i has size {np.shape(i)}, while it should have the size ({len(t)}) or ({len(t)},) .")
+        age_matrix = np.array([t]).T - np.array([t])+1
+        age_matrix[np.triu_indices(age_matrix.shape[0])] = 0
+        np.fill_diagonal(age_matrix, 1)
+        if scale_by_inflow:
+            array = np.einsum('tc,c->tc', s_c, self.reciprocal(i))
+        else:
+            array = s_c
+        shares = np.einsum('tc,t->tc',array, self.reciprocal(array.sum(axis=1))) # calculate the distribution of cohorts in each year (shares of the total)
+        age = np.einsum('tc,tc->t',shares,age_matrix)
+        return age
+    
+
+    def calculate_age_outflow(self, t=None, o_c=None, i=None, scale_by_inflow=True):
+        """
+        Calculates the mean age of outflows (during the entire year)
+        :par t:   An array describing the time vector t
+        :par o_c: An array of size (t,c) with outflows by cohort
+        :par i:   An array of size (t) with inflows. Used to scale the values by inflows in respective years
+        :par scale_by_inflow: A boolean indicating if scaling by inflow should be performed. 
+        :return age: An array of size (t) with the mean age in each year
+        """
+        if i is None:
+            i = self.i
+        if t is None:
+            t = self.t
+        if o_c is None:
+            o_c = self.o_c
+        if not np.shape(o_c) == (len(t), len(t)):
+            raise Exception(f"The array s_c has size {np.shape(o_c)}, while it should have the size {(len(t), len(t))}.")
+        if not (np.shape(i) == (len(t)) or np.shape(i) == (len(t),)):
+            raise Exception(f"The array i has size {np.shape(i)}, while it should have the size ({len(t)}) or ({len(t)},) .")
+        age_matrix = np.array([t]).T - np.array([t])
+        age_matrix[np.triu_indices(age_matrix.shape[0])] = 0
+        if scale_by_inflow:
+            array = np.einsum('tc,c->tc', o_c, self.reciprocal(i))
+        else:
+            array = o_c
         shares = np.einsum('tc,t->tc',array, self.reciprocal(array.sum(axis=1))) # calculate the distribution of cohorts in each year (shares of the total)
         age = np.einsum('tc,tc->t',shares,age_matrix)
         return age
