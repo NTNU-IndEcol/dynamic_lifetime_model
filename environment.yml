@@ -1,0 +1,10 @@
+name: dynamic-lifetime-model
+channels:
+  - defaults
+dependencies:
+  - numpy
+  - pandas
+  - openpyxl
+  - ipykernel
+  - matplotlib
+  - scipy
