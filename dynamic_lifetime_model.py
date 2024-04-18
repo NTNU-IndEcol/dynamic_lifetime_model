@@ -66,11 +66,12 @@ class DynamicLifetimeModel:
                 self.o_c[m,:m] = self.s_c[m-1,:m] * self.hz[m,:m] 
                 # subtract outflows of cohorts <m from the previous stock 
                 self.s_c[m,:m] = self.s_c[m-1,:m] - self.o_c[m,:m]
-            # Add new cohort to stock
-            self.s_c[m,m] = self.i[m]
-            self.o_c[m,m] = self.s_c[m,m] * self.hz[m,m]
+            # Add new cohort to stock, accounting for outflows in the first year
+            self.o_c[m,m] = self.i[m] * self.hz[m,m]
+            self.s_c[m,m] = self.i[m] - self.o_c[m,m]
         self.o = self.o_c.sum(axis=1)
         self.s = self.s_c.sum(axis=1)
+        self.compute_stock_change()
         return
 
     def compute_stock_change(self):
