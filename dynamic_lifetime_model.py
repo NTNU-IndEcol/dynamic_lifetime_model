@@ -371,8 +371,8 @@ class DynamicLifetimeModel:
         age = np.einsum('tc,tc->t',shares,age_matrix)
         return age
 
-    def create_2Darray(self, value):
-        array = create_2Darray(value, self.t)
+    def create_2Darray(self, value, by='cohort'):
+        array = create_2Darray(value, self.t, by)
         return array
     
     def compute_hz_from_sf(self, sf, set_hz=True):
@@ -411,12 +411,14 @@ class DynamicLifetimeModel:
         return hz
 
 
-def create_2Darray(value, t):
+def create_2Darray(value, t, by='cohort'):
     """
     Creates an array sized (t,t) such that the lower triangle (incl. the diagonal) is filled with provided values and the upper triangle 
     (except the diagonal) is set to zero. If the value is float or int, the array will be filled with a constant. If the value is an array
     of size (t,) or (1,t), the array will be filled cohort-wise. If the value is an array of size (t,1), the array will be filled period-wise.
     :par value: A value to fill the lower triangle
+    :par t: The time vector
+    :par by: string indicating the dimension of the array to be filled. Can be 'cohort', 'period' or 'age'
     :return array: An array of size (t,t)
     """
     if type(value) == float:
@@ -428,14 +430,28 @@ def create_2Darray(value, t):
             pass # cohort-wise
         elif np.shape(value) == (len(t),1):
             pass # period-wise
-        elif np.shape(value) == (1,):
+        if np.shape(value) == (1,):
             pass # constant
+        elif np.shape(value) in [(len(t),), (1,len(t)), (len(t),1)]:
+            if by == 'cohort':
+                value = value.reshape((len(t),))
+            elif by == 'period':
+                value = value.reshape((len(t),1))
+            elif by == 'age':
+                value = value.reshape((len(t),))
+            else:
+                raise ValueError(f"The given 'by' parameter should be equal to 'cohort', 'period' or 'age'.")
         else:
-            raise TypeError(f"The given value is a numpy.ndarray of shape {np.shape(value)} but only shapes {(1,)}, {(len(t),)}, {(1,len(t))} and {(len(t),1)} are accepted.")
+            raise ValueError(f"The given value is a numpy.ndarray of shape {np.shape(value)} but only shapes {(1,)} or {(len(t),)} are accepted.")
     else:
         raise TypeError("The given value should be of type int, float or numpy.ndarray.")
-    array = np.full((len(t),len(t)), value, dtype=float)
-    array = np.tril(array, 0)
+    if by == 'age':
+        array = np.zeros((len(t),len(t)), dtype=float)
+        for i in range(len(t)):
+            array[i:, i] = value[:len(t)-i]
+    else:
+        array = np.full((len(t),len(t)), value, dtype=float)
+        array = np.tril(array, 0)
     return array
 
 
