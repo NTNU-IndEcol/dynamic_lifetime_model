@@ -331,9 +331,8 @@ class DynamicLifetimeModel:
             raise Exception(f"The array s_c has size {np.shape(s_c)}, while it should have the size {(len(t), len(t))}.")
         if not (np.shape(i) == (len(t)) or np.shape(i) == (len(t),)):
             raise Exception(f"The array i has size {np.shape(i)}, while it should have the size ({len(t)}) or ({len(t)},) .")
-        age_matrix = np.array([t]).T - np.array([t])+1
-        age_matrix[np.triu_indices(age_matrix.shape[0])] = 0
-        np.fill_diagonal(age_matrix, 1)
+        age_matrix = np.array([t]).T - np.array([t])
+        age_matrix = np.tril(age_matrix)
         if scale_by_inflow:
             array = np.einsum('tc,c->tc', s_c, reciprocal(i))
         else:
@@ -423,7 +422,7 @@ def create_2Darray(value, t, by='cohort'):
     """
     if type(value) == float:
         pass
-    elif type(value) == int:
+    elif type(value) in [int, np.int64, np.float64]:
         value = float(value)
     elif type(value) == np.ndarray:
         if np.shape(value) == (len(t),) or np.shape(value) == (1,len(t)):
@@ -616,7 +615,8 @@ def compute_hz_from_lt_par(lt, t):
     Calculates the hazard table self.hz(t,c) from lifetime distribution parameters. 
     The hazard table denotes the probability of a product inflow from year n (cohort) 
     failing during time period m, still present at the beginning of time period m (after m-n years).
-    lt : lifetime distribution: dictionary with distribution type and parameters, where each parameter is of shape (t,c)
+    :par lt : lifetime distribution: dictionary with distribution type and parameters, where each parameter is of shape (t,c)
+    :par t: the time vector
     """
     # find unique sets of lifetime parameters
     unique, inverse, length = find_unique_lt(lt, t)
@@ -658,6 +658,8 @@ def compute_hz_from_lt_par(lt, t):
 def find_unique_lt(lt, t):
     """
     Finds unique sets of p lifetime parameters (e.g., for Weibull, the set includes scale and shape), each parameter of shape (t,t).
+    :par lt : lifetime distribution: dictionary with distribution type and parameters, where each parameter is of shape (t,c)
+    :par t: the time vector
     :return unique: The dictionary of parameters and their values, such that each set (p1[i], p2[i], ..., pn[i]) is unique. 
     :return inverse: The indices to reconstruct the original lt array from the unique array.
     :return length: Number of unique sets
