@@ -114,204 +114,6 @@ class DynamicLifetimeModel:
         self.o = self.o_c.sum(axis=1)
         return
 
-    def add_cohort_effect(self, array, value, effect_year, ref='absolute', trans_start=None, trans_type='linear', 
-                          period_interact=False, periods=None, age_interact=False, ages=None):
-        """
-        Adds a cohort effect to a given array. The strength of the effect is indicated by the provided value (absolute or relative). 
-        The effect is fully in force at effect_year, but can be preceded by a transition period starting at trans_start. 
-        The type of the transition can be 'linear' or 'logistic', indicated by trans_type. 
-        If trans_start is None, then the effect takes place between effect_year-1 and effect_year.
-        Period-cohort interaction can be implemented by setting period_interact as True and providing the affected periods.
-        Age-cohort interaction can be implemented by setting age_interact as True and providing the affected ages.
-
-        :par array: An array of size (t,t)
-        :par value: The strength of the effect, defined as an absolute (e.g., 12) or relative value (e.g., 1.2 for an increase from 10 to 12)
-        :par effect_year: The year at which the effect is fully in force
-        :par ref: Indicates whether the provided value is 'relative' or 'absolute'
-        :par trans_start: The start of the transition period. If None then the effect takes place between effect_year-1 and effect_year.
-        :par trans_type: The type of the transition, must be set as 'linear' or 'logistic'
-        :par period_interact: Boolean indicating whether period interaction should be considered. If True, the affected periods need to be provided
-        :par periods: Numpy array indicating periods affected by the cohort effect
-        :par age_interact: Boolean indicating whether age interaction should be considered. If True, the affected ages need to be provided
-        :par ages: Numpy array indicating ages affected by the cohort effect
-        :return array_new: An array of size (t,t) with the implemented cohort effect
-        """
-        if type(array) != np.ndarray:
-            raise TypeError("Parameter 'array' can only be of type 'numpy.ndarray'.")
-        if effect_year not in self.t:
-            raise ValueError("The parameter effect_year must be within the limits indicated by the time vector t")
-        
-        # find the transition start and end points
-        if trans_start is None:
-            start = math.ceil(effect_year)-1
-        else:
-            if trans_start not in self.t:
-                raise ValueError("The parameter trans_start must be within the limits indicated by the time vector t")
-            start = math.floor(trans_start)
-        stop = math.ceil(effect_year)
-        start_idx = np.where(self.t==start)[0][0]
-        stop_idx = np.where(self.t==stop)[0][0]
-        t_trans = np.arange(start_idx+1, stop_idx)
-
-        # potential interactions with other dimensions
-        if period_interact:
-            if type(periods) == np.ndarray:
-                period_idx = np.where(np.in1d(self.t,list(periods))==True)[0]
-            elif periods == None:
-                raise TypeError("Period interaction was requested but the parameter 'periods' was not provided.")
-            else:
-                raise TypeError("Parameter 'periods' can only be of type 'numpy.ndarray'.")
-        else:
-            period_idx = range(start_idx, len(self.t)) # for each period
-        if age_interact:
-            if type(ages) == np.ndarray:
-                age_matrix = np.array([self.t]).T - np.array([self.t])
-                age_matrix[np.triu_indices(age_matrix.shape[0])] = 0
-                age_matrix_bool = np.isin(age_matrix,list(ages))
-            elif ages == None:
-                raise TypeError("Age interaction was requested but the parameter 'ages' was not provided.")
-            else:
-                raise TypeError("Parameter 'ages' can only be of type 'numpy.ndarray'.")
-        else:
-            age_matrix_bool = np.ones_like(array,dtype=bool) # for each age
-        
-        # warn if this cohort effect erases previously applied cohort effects
-        diff = np.diff(np.concatenate((np.reshape(np.zeros_like(self.t),(len(self.t),1)), array),axis=1), axis=1)
-        diff = np.tril(diff)
-        check = np.zeros_like(array)
-        check[period_idx,start_idx+1:] = diff[period_idx,start_idx+1:] # select periods and cohorts
-        check = np.where(age_matrix_bool, check, np.zeros_like(array)) # select ages
-        if np.any(check):
-            print(f"Warning! This cohort effect erases previously applied cohort effects starting after cohort effect_year={effect_year}. To avoid this behavior, add effects chronologically.")
-
-        # calculation of the new values
-        array_new = np.array(array)
-        for n in period_idx: # for each period
-            # select the value to start with
-            value_1 = array[n,start_idx]
-            # select the value to end with
-            if ref=='relative':
-                value_2=value_1*value
-            elif ref=='absolute':
-                value_2 = value
-            else:
-                raise ValueError("Parameter 'how' can only take values 'relative' or 'absolute'.")
-            # find transition values
-            if trans_type == 'linear':
-                v_trans = value_2+(stop_idx-t_trans)/(stop_idx-start_idx)*(value_1-value_2)
-            elif trans_type == 'logistic': 
-                ti_idx = (stop_idx+start_idx)/2
-                a = 8/(stop-start-1)
-                v_trans = (value_2-value_1) / (1 + np.exp(-a * (t_trans - ti_idx))) + value_1
-            else:
-                raise ValueError("Parameter 'how' can only be set as 'linear' or 'logistic'.")
-            # set the transition values
-            array_new[n, start_idx+1:stop_idx] = v_trans
-            array_new[n, stop_idx:] = value_2
-        array_new = np.where(age_matrix_bool, array_new, array)
-        return array_new
-
-    def add_period_effect(self, array, value, effect_year, ref='absolute', trans_start=None, trans_type='linear', 
-                          coh_interact=False, cohorts=None, age_interact=False, ages=None):
-        """
-        Adds a period effect to a given array. The strength of the effect is indicated by the provided value (absolute or relative). 
-        The effect is fully in force at effect_year, but can be preceded by a transition period starting at trans_start. 
-        The type of the transition can be 'linear' or 'logistic', indicated by trans_type. 
-        If trans_start is None, then the effect takes place between effect_year-1 and effect_year.
-        Period-cohort interaction can be implemented by setting coh_interact as True and providing the affected cohorts.
-        Age-cohort interaction can be implemented by setting age_interact as True and providing the affected ages.
-
-        :par array: An array of size (t,t)
-        :par value: The strength of the effect, defined as an absolute (e.g., 12) or relative value (e.g., 1.2 for an increase from 10 to 12)
-        :par effect_year: The year at which the effect is fully in force
-        :par ref: Indicates whether the provided value is 'relative' or 'absolute'
-        :par trans_start: The start of the transition period. If None then the effect takes place between effect_year-1 and effect_year.
-        :par trans_type: The type of the transition, must be set as 'linear' or 'logistic'
-        :par coh_interact: Boolean indicating whether cohort interaction should be considered. If True, the affected cohorts need to be provided
-        :par cohorts: Numpy array indicating cohorts affected by the period effect
-        :par age_interact: Boolean indicating whether age interaction should be considered. If True, the affected ages need to be provided
-        :par ages: Numpy array indicating ages affected by the period effect
-        :return array_new: An array of size (t,t) with the implemented period effect
-        """
-        if type(array) != np.ndarray:
-            raise TypeError("Parameter 'array' can only be of type 'numpy.ndarray'.")
-        if effect_year not in self.t:
-            raise ValueError("The parameter effect_year must be within the limits indicated by the time vector t")
-
-        # find the transition start and end points
-        if trans_start is None:
-            start = math.ceil(effect_year)-1
-        else:
-            if trans_start not in self.t:
-                raise ValueError("The parameter trans_start must be within the limits indicated by the time vector t")
-            start = math.floor(trans_start)
-        stop = math.ceil(effect_year)
-        start_idx = np.where(self.t==start)[0][0]
-        stop_idx = np.where(self.t==stop)[0][0]
-        t_trans = np.arange(start_idx+1, stop_idx)
-
-        # potential interactions with other dimensions
-        if coh_interact:
-            if type(cohorts) == np.ndarray:
-                cohort_idx = np.where(np.in1d(self.t,list(cohorts))==True)[0]
-            elif cohorts == None:
-                raise TypeError("Cohort interaction was requested but the parameter'cohorts' was not provided.")
-            else:
-                raise TypeError("Parameter 'cohorts' can only be of type 'numpy.ndarray'.")
-        else:
-            cohort_idx = range(len(self.t)) # for each cohort
-        if age_interact:
-            if type(ages) == np.ndarray:
-                age_matrix = np.array([self.t]).T - np.array([self.t])
-                age_matrix[np.triu_indices(age_matrix.shape[0])] = 0
-                age_matrix_bool = np.isin(age_matrix,list(ages))
-            elif ages == None:
-                raise TypeError("Age interaction was requested but the parameter 'ages' was not provided.")
-            else:
-                raise TypeError("Parameter 'ages' can only be of type 'numpy.ndarray'.")
-        else:
-            age_matrix_bool = np.ones_like(array,dtype=bool) # for each age
-        age_matrix_bool = np.tril(age_matrix_bool,0) # to make sure we don't change values for years lower than cohort (m<n)
-
-        # warn if this period effect erases previously applied period effects
-        diff = np.diff(np.concatenate((np.reshape(np.zeros_like(self.t),(1,len(self.t))), array),axis=0), axis=0)
-        diff = np.tril(diff,-1)
-        check = np.zeros_like(array)
-        check[start_idx+1:, cohort_idx] = diff[start_idx+1:, cohort_idx]  # select periods and cohorts
-        check = np.where(age_matrix_bool, check, np.zeros_like(array)) # select ages
-        if np.any(check):
-            print(f"Warning! This period effect erases previously applied period effects starting after period effect_year={effect_year}. To avoid this behavior, add effects chronologically.")
-
-        # calculation of the new values
-        array_new = np.array(array)
-        for n in cohort_idx: # for each cohort
-            # select the value to start with
-            if start_idx>n:
-                value_1 = array[start_idx,n]
-            else: # use the last cohort before the effect starts for the cohorts entering after the effect is already in place
-                value_1 = array[start_idx,start_idx]
-            # select the value to end with
-            if ref=='relative':
-                value_2=value_1*value
-            elif ref=='absolute':
-                value_2 = value
-            else:
-                raise Exception("Parameter 'how' can only take values 'relative' or 'absolute'.")
-            # find transition values
-            if trans_type == 'linear':
-                v_trans = value_2+(stop_idx-t_trans)/(stop_idx-start_idx)*(value_1-value_2)
-            elif trans_type == 'logistic': 
-                ti_idx = (stop_idx+start_idx)/2
-                a = 8/(stop-start-1)
-                v_trans = (value_2-value_1) / (1 + np.exp(-a * (t_trans - ti_idx))) + value_1
-            else:
-                raise ValueError("Parameter 'how' can only be set as 'linear' or 'logistic'.")
-            # set the transition values
-            array_new[start_idx+1:stop_idx,n] = v_trans
-            array_new[stop_idx:,n] = value_2
-        array_new = np.where(age_matrix_bool, array_new, array)
-        return array_new
-
     def calculate_age_stock(self, t=None, s_c=None, i=None, scale_by_inflow=True):
         """
         Calculates the mean age of stocks (measured at the end of each year)
@@ -371,7 +173,7 @@ class DynamicLifetimeModel:
         return age
 
     def create_2Darray(self, value, by='cohort'):
-        array = create_2Darray(value, self.t, by)
+        array = create_2Darray(self.t, value, by)
         return array
     
     def compute_hz_from_sf(self, sf, set_hz=True):
@@ -404,13 +206,21 @@ class DynamicLifetimeModel:
                 raise Exception('No product lifetime specified')
             else:
                 lt = self.lt
-        hz = compute_hz_from_lt_par(lt, self.t)
+        hz = compute_hz_from_lt_par(self.t, lt)
         if set_hz:
             self.hz = hz
         return hz
 
+    def add_period_effect(self, array, value, effect_year, ref='absolute', trans_start=None, trans_type='linear', cohorts='all', ages='all'):
+        array_new = add_period_effect(self.t, array, value, effect_year, ref=ref, trans_start=trans_start, trans_type=trans_type, cohorts=cohorts, ages=ages)
+        return array_new
 
-def create_2Darray(value, t, by='cohort'):
+    def add_cohort_effect(self, array, value, effect_year, ref='absolute', trans_start=None, trans_type='linear', periods='all', ages='all'):
+        array_new = add_cohort_effect(self.t, array, value, effect_year, ref=ref, trans_start=trans_start, trans_type=trans_type, periods=periods, ages=ages)
+        return array_new
+
+
+def create_2Darray(t, value, by='cohort'):
     """
     Creates an array sized (t,t) such that the lower triangle (incl. the diagonal) is filled with provided values and the upper triangle 
     (except the diagonal) is set to zero. If the value is float or int, the array will be filled with a constant. If the value is an array
@@ -420,15 +230,11 @@ def create_2Darray(value, t, by='cohort'):
     :par by: string indicating the dimension of the array to be filled. Can be 'cohort', 'period' or 'age'
     :return array: An array of size (t,t)
     """
-    if type(value) == float:
+    if type(value) in [float, np.float64, np.float32]:
         pass
-    elif type(value) in [int, np.int64, np.float64]:
+    elif type(value) in [int, np.int64, np.int32]:
         value = float(value)
     elif type(value) == np.ndarray:
-        if np.shape(value) == (len(t),) or np.shape(value) == (1,len(t)):
-            pass # cohort-wise
-        elif np.shape(value) == (len(t),1):
-            pass # period-wise
         if np.shape(value) == (1,):
             pass # constant
         elif np.shape(value) in [(len(t),), (1,len(t)), (len(t),1)]:
@@ -445,11 +251,11 @@ def create_2Darray(value, t, by='cohort'):
     else:
         raise TypeError("The given value should be of type int, float or numpy.ndarray.")
     if by == 'age':
-        array = np.zeros((len(t),len(t)), dtype=float)
+        array = np.zeros((len(t),len(t)), dtype=np.float64)
         for i in range(len(t)):
             array[i:, i] = value[:len(t)-i]
     else:
-        array = np.full((len(t),len(t)), value, dtype=float)
+        array = np.full((len(t),len(t)), value, dtype=np.float64)
         array = np.tril(array, 0)
     return array
 
@@ -610,7 +416,7 @@ def combine_multiple_hz(hz_list, shares):
     return hz_output
 
 
-def compute_hz_from_lt_par(lt, t):
+def compute_hz_from_lt_par(t, lt):
     """
     Calculates the hazard table self.hz(t,c) from lifetime distribution parameters. 
     The hazard table denotes the probability of a product inflow from year n (cohort) 
@@ -619,7 +425,7 @@ def compute_hz_from_lt_par(lt, t):
     :par t: the time vector
     """
     # find unique sets of lifetime parameters
-    unique, inverse, length = find_unique_lt(lt, t)
+    unique, inverse, length = find_unique_lt(t, lt)
     # calculate sf for each unique parameter set
     hz_unique = np.zeros((len(t),length))
     if lt['Type'] == 'Normal':
@@ -655,7 +461,7 @@ def compute_hz_from_lt_par(lt, t):
     return hz
 
 
-def find_unique_lt(lt, t):
+def find_unique_lt(t, lt):
     """
     Finds unique sets of p lifetime parameters (e.g., for Weibull, the set includes scale and shape), each parameter of shape (t,t).
     :par lt : lifetime distribution: dictionary with distribution type and parameters, where each parameter is of shape (t,c)
@@ -672,4 +478,199 @@ def find_unique_lt(lt, t):
     length = np.shape(unique)[1]
     unique = {k:unique[p,:] for p,k in enumerate(params.keys())}
     return unique, inverse, length
+
+
+def add_period_effect(t, array, value, effect_year, ref='absolute', trans_start=None, trans_type='linear', 
+                      cohorts='all', ages='all'):
+    """
+    Adds a period effect to a given array. The strength of the effect is indicated by the provided value (absolute or relative). 
+    The effect is fully in force at effect_year, but can be preceded by a transition period starting at trans_start. 
+    The type of the transition can be 'linear' or 'logistic', indicated by trans_type. 
+    If trans_start is None, then the effect takes place between effect_year-1 and effect_year.
+    Period-cohort interaction can be implemented by setting coh_interact as True and providing the affected cohorts.
+    Age-cohort interaction can be implemented by setting age_interact as True and providing the affected ages.
+    :par t: the time vector
+    :par array: An array of size (t,t)
+    :par value: The strength of the effect, defined as an absolute (e.g., 12) or relative value (e.g., 1.2 for an increase from 10 to 12)
+    :par effect_year: The year at which the effect is fully in force
+    :par ref: Indicates whether the provided value is 'relative' or 'absolute'
+    :par trans_start: The start of the transition period. If None then the effect takes place between effect_year-1 and effect_year.
+    :par trans_type: The type of the transition, must be set as 'linear' or 'logistic'
+    :par cohorts: Numpy array indicating cohorts affected by the period effect. Default is 'all', which means all are affected.
+    :par ages: Numpy array indicating ages affected by the period effect. Default is 'all', which means all are affected.
+    :return array_new: An array of size (t,t) with the implemented period effect
+    """
+    if type(array) != np.ndarray:
+        raise TypeError("Parameter 'array' can only be of type 'numpy.ndarray'.")
+    if effect_year not in t:
+        raise ValueError("The parameter effect_year must be within the limits indicated by the time vector t")
+
+    # find the transition start and end points
+    if trans_start is None:
+        start = math.ceil(effect_year)-1
+    else:
+        if trans_start not in t:
+            raise ValueError("The parameter trans_start must be within the limits indicated by the time vector t")
+        start = math.floor(trans_start)
+    stop = math.ceil(effect_year)
+    start_idx = np.where(t==start)[0][0]
+    stop_idx = np.where(t==stop)[0][0]
+    t_trans = np.arange(start_idx+1, stop_idx)
+
+    # potential interactions with other dimensions
+    if type(cohorts) == str:
+        if cohorts == 'all':
+            cohort_idx = range(len(t)) # for each cohort
+        else:
+            raise ValueError("Parameter 'cohorts' can only be set as 'all' or numpy array.")
+    elif type(cohorts) == np.ndarray:
+        cohort_idx = np.where(np.in1d(t,list(cohorts))==True)[0]
+    else:
+        raise TypeError("Parameter 'cohorts' can only be set as 'all' or numpy array.")
+    if type(ages) == str:
+        if ages == 'all':
+            age_matrix_bool = np.ones_like(array,dtype=bool) # for each age
+        else:
+            raise ValueError("Parameter 'ages' can only be set as 'all' or numpy array.")
+    elif type(ages) == np.ndarray:
+        age_matrix = np.array([t]).T - np.array([t])
+        age_matrix[np.triu_indices(age_matrix.shape[0])] = 0
+        age_matrix_bool = np.isin(age_matrix,list(ages))
+    else:
+        raise TypeError("Parameter 'ages' can only be set as 'all' or numpy array.")     
+    age_matrix_bool = np.tril(age_matrix_bool,0) # to make sure we don't change values for years lower than cohort (m<n)
+
+    # warn if this period effect erases previously applied period effects
+    diff = np.diff(np.concatenate((np.reshape(np.zeros_like(t),(1,len(t))), array),axis=0), axis=0)
+    diff = np.tril(diff,-1)
+    check = np.zeros_like(array)
+    check[start_idx+1:, cohort_idx] = diff[start_idx+1:, cohort_idx]  # select periods and cohorts
+    check = np.where(age_matrix_bool, check, np.zeros_like(array)) # select ages
+    if np.any(check):
+        print(f"Warning! This period effect erases previously applied period effects starting after period effect_year={effect_year}. To avoid this behavior, add effects chronologically.")
+
+    # calculation of the new values
+    array_new = np.array(array)
+    for n in cohort_idx: # for each cohort
+        # select the value to start with
+        if start_idx>n:
+            value_1 = array[start_idx,n]
+        else: # use the last cohort before the effect starts for the cohorts entering after the effect is already in place
+            value_1 = array[start_idx,start_idx]
+        # select the value to end with
+        if ref=='relative':
+            value_2=value_1*value
+        elif ref=='absolute':
+            value_2 = value
+        else:
+            raise Exception("Parameter 'how' can only take values 'relative' or 'absolute'.")
+        # find transition values
+        if trans_type == 'linear':
+            v_trans = value_2+(stop_idx-t_trans)/(stop_idx-start_idx)*(value_1-value_2)
+        elif trans_type == 'logistic': 
+            ti_idx = (stop_idx+start_idx)/2
+            a = 8/(stop-start-1)
+            v_trans = (value_2-value_1) / (1 + np.exp(-a * (t_trans - ti_idx))) + value_1
+        else:
+            raise ValueError("Parameter 'how' can only be set as 'linear' or 'logistic'.")
+        # set the transition values
+        array_new[start_idx+1:stop_idx,n] = v_trans
+        array_new[stop_idx:,n] = value_2
+    array_new = np.where(age_matrix_bool, array_new, array)
+    return array_new
+
+def add_cohort_effect(t, array, value, effect_year, ref='absolute', trans_start=None, trans_type='linear', 
+                      periods='all', ages='all'):
+    """
+    Adds a cohort effect to a given array. The strength of the effect is indicated by the provided value (absolute or relative). 
+    The effect is fully in force at effect_year, but can be preceded by a transition period starting at trans_start. 
+    The type of the transition can be 'linear' or 'logistic', indicated by trans_type. 
+    If trans_start is None, then the effect takes place between effect_year-1 and effect_year.
+    Period-cohort interaction can be implemented by setting period_interact as True and providing the affected periods.
+    Age-cohort interaction can be implemented by setting age_interact as True and providing the affected ages.
+    :par t: the time vector
+    :par array: An array of size (t,t)
+    :par value: The strength of the effect, defined as an absolute (e.g., 12) or relative value (e.g., 1.2 for an increase from 10 to 12)
+    :par effect_year: The year at which the effect is fully in force
+    :par ref: Indicates whether the provided value is 'relative' or 'absolute'
+    :par trans_start: The start of the transition period. If None then the effect takes place between effect_year-1 and effect_year.
+    :par trans_type: The type of the transition, must be set as 'linear' or 'logistic'
+    :par periods: Numpy array indicating periods affected by the cohort effect. Default is 'all' which means all are affected.
+    :par ages: Numpy array indicating ages affected by the cohort effect. Default is 'all' which means all are affected.
+    :return array_new: An array of size (t,t) with the implemented cohort effect
+    """
+    if type(array) != np.ndarray:
+        raise TypeError("Parameter 'array' can only be of type 'numpy.ndarray'.")
+    if effect_year not in t:
+        raise ValueError("The parameter effect_year must be within the limits indicated by the time vector t")
+    
+    # find the transition start and end points
+    if trans_start is None:
+        start = math.ceil(effect_year)-1
+    else:
+        if trans_start not in t:
+            raise ValueError("The parameter trans_start must be within the limits indicated by the time vector t")
+        start = math.floor(trans_start)
+    stop = math.ceil(effect_year)
+    start_idx = np.where(t==start)[0][0]
+    stop_idx = np.where(t==stop)[0][0]
+    t_trans = np.arange(start_idx+1, stop_idx)
+
+    # potential interactions with other dimensions
+    if type(periods) == str:
+        if periods == 'all':
+            period_idx = range(start_idx,len(t)) # for each cohort
+        else:
+            raise ValueError("Parameter 'periods' can only be set as 'all' or numpy array.")
+    elif type(periods) == np.ndarray:
+        period_idx = np.where(np.in1d(t,list(periods))==True)[0]
+    else:
+        raise TypeError("Parameter 'periods' can only be set as 'all' or numpy array.")
+    if type(ages) == str:
+        if ages == 'all':
+            age_matrix_bool = np.ones_like(array,dtype=bool) # for each age
+        else:
+            raise ValueError("Parameter 'ages' can only be set as 'all' or numpy array.")
+    elif type(ages) == np.ndarray:
+        age_matrix = np.array([t]).T - np.array([t])
+        age_matrix[np.triu_indices(age_matrix.shape[0])] = 0
+        age_matrix_bool = np.isin(age_matrix,list(ages))
+    else:
+        raise TypeError("Parameter 'ages' can only be set as 'all' or numpy array.")   
+    
+    # warn if this cohort effect erases previously applied cohort effects
+    diff = np.diff(np.concatenate((np.reshape(np.zeros_like(t),(len(t),1)), array),axis=1), axis=1)
+    diff = np.tril(diff)
+    check = np.zeros_like(array)
+    check[period_idx,start_idx+1:] = diff[period_idx,start_idx+1:] # select periods and cohorts
+    check = np.where(age_matrix_bool, check, np.zeros_like(array)) # select ages
+    if np.any(check):
+        print(f"Warning! This cohort effect erases previously applied cohort effects starting after cohort effect_year={effect_year}. To avoid this behavior, add effects chronologically.")
+
+    # calculation of the new values
+    array_new = np.array(array)
+    for n in period_idx: # for each period
+        # select the value to start with
+        value_1 = array[n,start_idx]
+        # select the value to end with
+        if ref=='relative':
+            value_2=value_1*value
+        elif ref=='absolute':
+            value_2 = value
+        else:
+            raise ValueError("Parameter 'how' can only take values 'relative' or 'absolute'.")
+        # find transition values
+        if trans_type == 'linear':
+            v_trans = value_2+(stop_idx-t_trans)/(stop_idx-start_idx)*(value_1-value_2)
+        elif trans_type == 'logistic': 
+            ti_idx = (stop_idx+start_idx)/2
+            a = 8/(stop-start-1)
+            v_trans = (value_2-value_1) / (1 + np.exp(-a * (t_trans - ti_idx))) + value_1
+        else:
+            raise ValueError("Parameter 'how' can only be set as 'linear' or 'logistic'.")
+        # set the transition values
+        array_new[n, start_idx+1:stop_idx] = v_trans
+        array_new[n, stop_idx:] = value_2
+    array_new = np.where(age_matrix_bool, array_new, array)
+    return array_new
 
