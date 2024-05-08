@@ -425,6 +425,10 @@ def compute_hz_from_lt_par(t, lt):
     :par t: the time vector
     """
     # find unique sets of lifetime parameters
+    for k,v in lt.items():
+        if k != 'Type':
+            if np.shape(v) != (len(t), len(t)):
+                raise Exception(f"Parameter {k} should be of shape ({len(t)},{len(t)}).")
     unique, inverse, length = find_unique_lt(t, lt)
     # calculate sf for each unique parameter set
     hz_unique = np.zeros((len(t),length))
